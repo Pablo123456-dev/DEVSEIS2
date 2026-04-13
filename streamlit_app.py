@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import sys
 import tempfile
 import traceback
@@ -26,30 +28,61 @@ def _persist_upload(uploaded_file, suffix: str) -> str:
     return str(target)
 
 
+def _load_module_from_file(module_name: str, file_path: Path, is_package: bool = False):
+    kwargs = {"submodule_search_locations": [str(file_path.parent)]} if is_package else {}
+    spec = importlib.util.spec_from_file_location(module_name, str(file_path), **kwargs)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not create import spec for {module_name} from {file_path}.")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _import_backend_modules():
+    package_dir = PROJECT_ROOT / "dhi_platform"
+
+    try:
+        importlib.import_module("dhi_platform")
+    except ModuleNotFoundError:
+        if not package_dir.exists():
+            raise ModuleNotFoundError(
+                "The 'dhi_platform' folder is missing from the deployed app. "
+                "Make sure the repository includes dhi_platform/__init__.py and all module files."
+            )
+        _load_module_from_file("dhi_platform", package_dir / "__init__.py", is_package=True)
+
+    dhi_module = importlib.import_module("dhi_platform.dhi")
+    las_module = importlib.import_module("dhi_platform.las_utils")
+    segy_module = importlib.import_module("dhi_platform.segy_utils")
+    viz_module = importlib.import_module("dhi_platform.visualization")
+
+    return {
+        "result_geojson": dhi_module.result_geojson,
+        "run_dhi_workflow": dhi_module.run_dhi_workflow,
+        "read_las_files": las_module.read_las_files,
+        "build_target_time_grid": segy_module.build_target_time_grid,
+        "read_segy_metadata": segy_module.read_segy_metadata,
+        "basemap_figure": viz_module.basemap_figure,
+        "heatmap_figure": viz_module.heatmap_figure,
+        "polygon_metrics": viz_module.polygon_metrics,
+        "well_table": viz_module.well_table,
+    }
+
+
 @st.cache_resource
 def _load_backend():
     try:
-        from dhi_platform.dhi import result_geojson, run_dhi_workflow
-        from dhi_platform.las_utils import read_las_files
-        from dhi_platform.segy_utils import build_target_time_grid, read_segy_metadata
-        from dhi_platform.visualization import basemap_figure, heatmap_figure, polygon_metrics, well_table
+        return _import_backend_modules()
     except Exception as exc:  # pragma: no cover - startup diagnostics for deployment
         return {
             "error": exc,
             "traceback": traceback.format_exc(),
+            "project_root": str(PROJECT_ROOT),
+            "project_root_exists": PROJECT_ROOT.exists(),
+            "project_listing": sorted(path.name for path in PROJECT_ROOT.iterdir()) if PROJECT_ROOT.exists() else [],
+            "package_dir_exists": (PROJECT_ROOT / "dhi_platform").exists(),
         }
-
-    return {
-        "result_geojson": result_geojson,
-        "run_dhi_workflow": run_dhi_workflow,
-        "read_las_files": read_las_files,
-        "build_target_time_grid": build_target_time_grid,
-        "read_segy_metadata": read_segy_metadata,
-        "basemap_figure": basemap_figure,
-        "heatmap_figure": heatmap_figure,
-        "polygon_metrics": polygon_metrics,
-        "well_table": well_table,
-    }
 
 
 st.title("Seismic DHI Mapper")
@@ -65,6 +98,15 @@ if "error" in backend:
         "This is usually caused by a missing binary dependency such as `shapely`, `scipy`, or `scikit-image`."
     )
     st.code(f"{type(exc).__name__}: {exc}")
+    with st.expander("Deployment diagnostics", expanded=False):
+        st.json(
+            {
+                "project_root": backend.get("project_root"),
+                "project_root_exists": backend.get("project_root_exists"),
+                "package_dir_exists": backend.get("package_dir_exists"),
+                "project_listing": backend.get("project_listing"),
+            }
+        )
     with st.expander("Import traceback", expanded=False):
         st.code(backend["traceback"])
     st.stop()
