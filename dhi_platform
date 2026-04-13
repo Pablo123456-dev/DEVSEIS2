@@ -1,1 +1,5 @@
+git add dhi_platform
+git add streamlit_app.py requirements.txt desktop_requirements.txt README.md
+git commit -m "Add dhi_platform package for Streamlit deployment"
+git push origin main
 
