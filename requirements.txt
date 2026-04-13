@@ -1,0 +1,10 @@
+streamlit>=1.35
+numpy>=1.25
+pandas>=2.1
+plotly>=5.22
+scipy>=1.11
+scikit-image>=0.22
+shapely>=2.0
+pyproj>=3.6
+segyio>=1.9
+lasio>=0.31
